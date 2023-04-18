@@ -1,0 +1,86 @@
+#include <Wire.h>
+#include <MPU6050.h>
+#include <esp_now.h>
+#include <WiFi.h>
+
+// REPLACE WITH YOUR RECEIVER MAC Address
+uint8_t broadcastAddress[] = {0x94, 0xB9, 0x7E, 0xE5, 0xA4, 0x64};
+
+// Structure example to send data
+// Must match the receiver structure
+typedef struct struct_message {
+ float inclinacaoX;
+ float inclinacaoY;
+ float velocidade;
+ int anguloServo;
+} struct_message;
+
+// Create a struct_message called myData
+struct_message myData;
+
+esp_now_peer_info_t peerInfo;
+
+// callback when data is sent
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+// Configurando o módulo MPU6050
+MPU6050 mpu;
+
+void setup() {
+
+  Serial.begin(115200);
+  // Inicializando o módulo MPU6050
+  Wire.begin();
+  mpu.initialize();
+
+   // Set device as a Wi-Fi Station
+  WiFi.mode(WIFI_STA);
+
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+  
+  // Register peer
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;
+  
+  // Add peer        
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+  }
+}
+ void loop() {
+  // Lendo os valores do acelerômetro
+  int16_t ax, ay, az;
+  mpu.getAcceleration(&ax, &ay, &az);
+  
+  // Calculando a inclinação do módulo em relação ao eixo X
+  float inclinacaoX = atan2(ay, sqrt(pow(ax,2) + pow(az,2))) * 180 / PI;
+  
+  // Calculando a inclinação do módulo em relação ao eixo Y
+  float inclinacaoY = atan2(-ax, sqrt(pow(ay,2) + pow(az,2))) * 180 / PI;
+
+  float velocidade = map(inclinacaoX, -90, 90, -255, 255);
+
+  // Send message via ESP-NOW
+  esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+   
+  if (result == ESP_OK) {
+    Serial.println("Sent with success");
+  }
+  else {
+    Serial.println("Error sending the data");
+  }
+  delay(200); 
+ }  
